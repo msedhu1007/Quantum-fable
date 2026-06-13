@@ -1,0 +1,13 @@
+# Automatic HTTPS via Let's Encrypt — Caddy handles cert issuance + renewal.
+
+sedhuhome.ai {
+	reverse_proxy frontend:3000
+}
+
+www.sedhuhome.ai {
+	redir https://sedhuhome.ai{uri} permanent
+}
+
+api.sedhuhome.ai {
+	reverse_proxy backend:8000
+}

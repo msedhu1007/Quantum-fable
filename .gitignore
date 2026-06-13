@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.db
+dev.db
+
+# Node
+node_modules/
+.next/
+out/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Local screenshots / scratch
+/research-*.png
+/ui-*.png
+.playwright-cli/
+.playwright-mcp/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.pem
