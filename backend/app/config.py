@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     )
     max_watchlist: int = 50
     market_benchmark: str = "SPY"
+    # Growth & Value board seed universe — moat-quality + cyclical fingerprints
+    # across AI-infra, memory cycle, power/electrification, and durable compounders.
+    default_growth_value_list: str = (
+        "NVDA,AVGO,VRT,MU,WDC,SNDK,STX,GEV,VST,CEG,"
+        "ASML,KLAC,LRCX,AMAT,TSM,ANET,SMCI,DELL,PANW,CRWD"
+    )
 
     # Contract filters
     min_dte: int = 7

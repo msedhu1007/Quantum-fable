@@ -73,9 +73,12 @@ export interface GVRow {
   market_cap: number | null;
   pe: number | null;
   ps: number | null;
+  ev_sales: number | null;
   revenue_growth_yoy: number | null;
   eps_growth_yoy: number | null;
+  gross_margin: number | null;
   net_margin: number | null;
+  fcf_margin: number | null;
   roe: number | null;
   debt_to_equity: number | null;
 }
@@ -106,21 +109,53 @@ export interface GVScore {
   coverage_pct: number;
 }
 
+export interface GVMarginTrend {
+  history: [string, number][];
+  delta_pts: number;
+  direction: "rising" | "stable" | "eroding";
+}
+
+export interface GVFlag {
+  level: "flag" | "caution" | "note";
+  text: string;
+}
+
+export interface GVEntryGuidance {
+  valuation_state: string;
+  flags: GVFlag[];
+  watch: string[];
+  disclaimer: string;
+}
+
+export interface GVNote {
+  thesis: string | null;
+  risks: string | null;
+  watch: string | null;
+  updated_at: string | null;
+}
+
 export interface GVScorecard {
   symbol: string;
   available: boolean;
-  note?: string;
+  unavailable_reason?: string;
   growth: GVScore;
   value: GVScore;
+  margin_trend?: GVMarginTrend | null;
+  entry_guidance?: GVEntryGuidance;
+  note?: GVNote | null;
   metrics: {
     price?: number | null;
     market_cap?: number | null;
     pe?: number | null;
+    forward_pe?: number | null;
     ps?: number | null;
+    ev_sales?: number | null;
     revenue_growth_yoy?: number | null;
     eps_growth_yoy?: number | null;
+    gross_margin?: number | null;
     net_margin?: number | null;
     operating_margin?: number | null;
+    fcf_margin?: number | null;
     roe?: number | null;
     debt_to_equity?: number | null;
     current_ratio?: number | null;
@@ -288,6 +323,11 @@ export const api = {
   removeGvSymbol: (symbol: string) =>
     request(`/growth-value/universe/${symbol}`, { method: "DELETE" }),
   gvScorecard: (ticker: string) => request<GVScorecard>(`/growth-value/${ticker}`),
+  saveGvNote: (ticker: string, note: { thesis: string; risks: string; watch: string }) =>
+    request<GVNote>(`/growth-value/${ticker}/note`, {
+      method: "PUT",
+      body: JSON.stringify(note),
+    }),
   providers: () =>
     request<{
       market_data_provider: string;

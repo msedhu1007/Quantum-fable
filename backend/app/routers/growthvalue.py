@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from .. import growthvalue
 from ..db import get_db
-from ..models import GrowthValueItem
+from ..models import GrowthValueItem, GrowthValueNote
 
 router = APIRouter(prefix="/growth-value", tags=["growth-value"])
 
@@ -61,6 +61,33 @@ def universe_remove(symbol: str, db: Session = Depends(get_db)):
     db.delete(item)
     db.commit()
     return None
+
+
+class NoteIn(BaseModel):
+    thesis: str | None = Field(default=None, max_length=4000)
+    risks: str | None = Field(default=None, max_length=4000)
+    watch: str | None = Field(default=None, max_length=4000)
+
+
+@router.put("/{ticker}/note")
+def save_note(ticker: str, payload: NoteIn, db: Session = Depends(get_db)):
+    """Upsert the human moat thesis for a ticker (why / what-breaks-it / watch)."""
+    symbol = ticker.strip().upper()
+    note = db.scalar(select(GrowthValueNote).where(GrowthValueNote.symbol == symbol))
+    if not note:
+        note = GrowthValueNote(symbol=symbol)
+        db.add(note)
+    note.thesis = (payload.thesis or "").strip() or None
+    note.risks = (payload.risks or "").strip() or None
+    note.watch = (payload.watch or "").strip() or None
+    db.commit()
+    return {
+        "symbol": symbol,
+        "thesis": note.thesis,
+        "risks": note.risks,
+        "watch": note.watch,
+        "updated_at": note.updated_at.isoformat() if note.updated_at else None,
+    }
 
 
 @router.get("/{ticker}")

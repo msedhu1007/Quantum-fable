@@ -40,6 +40,20 @@ class GrowthValueItem(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class GrowthValueNote(Base):
+    """Human moat thesis per ticker — the qualitative judgment the score can't make.
+    Mechanism (why a moat), what would break it, and what to monitor. The score
+    triages; the human writes the thesis. Research notes only — not advice."""
+    __tablename__ = "growth_value_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(12), unique=True, index=True)
+    thesis: Mapped[str | None] = mapped_column(Text, nullable=True)   # why a moat exists
+    risks: Mapped[str | None] = mapped_column(Text, nullable=True)    # what breaks it
+    watch: Mapped[str | None] = mapped_column(Text, nullable=True)    # what to monitor
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class TickerSnapshot(Base):
     __tablename__ = "ticker_snapshots"
 

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from . import growthvalue, momentum
 from .config import get_settings
 from .db import Base, SessionLocal, engine
-from .models import WatchlistItem
+from .models import GrowthValueItem, WatchlistItem
 from .routers import alerts, growthvalue as growthvalue_router, meta, research, scan, watchlist
 from .scanner import market_is_open, scan_all, scan_status
 
@@ -29,10 +29,24 @@ def seed_watchlist() -> None:
         db.commit()
 
 
+def seed_growth_value() -> None:
+    """Populate the Growth & Value board so it is not empty out of the box.
+    Only seeds an empty table — never re-adds tickers the user has removed."""
+    with SessionLocal() as db:
+        if db.scalar(select(GrowthValueItem.id).limit(1)) is not None:
+            return
+        for symbol in settings.default_growth_value_list.split(","):
+            symbol = symbol.strip().upper()
+            if symbol:
+                db.add(GrowthValueItem(symbol=symbol))
+        db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     seed_watchlist()
+    seed_growth_value()
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         scan_all,

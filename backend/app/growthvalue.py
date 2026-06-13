@@ -2,13 +2,20 @@
 
 Long-horizon research lens (distinct from the short-term options scoring in
 ``scoring.py``). Two deterministic 0..100 scores per ticker, each built from
-fundamentals already available via the providers — no extra financial-statement
-calls. Each factor maps a metric to 0..10; weights sum to 100. Missing metrics
-are scored N/A and the remaining weights re-normalize, so thin-data tickers
-still land on a comparable 0..100 scale.
+fundamentals via the providers. Each factor maps a metric to 0..10; weights sum
+to 100. Missing metrics are scored N/A and the remaining weights re-normalize,
+so thin-data tickers still land on a comparable 0..100 scale.
 
-Simplified by design: no FCF yield, EV/EBITDA, gross-margin trend, or multi-year
-CAGR (the OVERVIEW / key-metric endpoints don't expose them). The UI says so.
+Two fingerprints by design:
+  * Growth/Moat — gross-margin level (pricing power) + FCF margin (cash
+    conversion, anti-dilution) on top of revenue/EPS growth. A no-margin
+    revenue-grower (growth trap) scores low here.
+  * Value — EV/Sales leads so a cyclical at a trough (depressed/negative EPS,
+    P/E meaningless — the SanDisk-trough pattern) still scores; P/E de-weighted.
+
+Yahoo (yfinance) is the primary fundamentals source (gross margin, FCF, EV/Sales,
+D/E, forward P/E in one call); Alpha Vantage / Finnhub backfill gaps. The
+per-ticker drilldown adds a multi-year gross-margin trend (moat-durability tell).
 
 Board mechanics (cache + async refresh) mirror ``momentum.py``. Research only —
 not investment advice.
@@ -79,11 +86,16 @@ def _assemble(rows: list[tuple]) -> dict:
 
 
 def compute_growth_score(m: dict | None) -> dict:
-    """0..100 growth score with per-factor breakdown."""
+    """0..100 growth + moat-quality score with per-factor breakdown.
+
+    Beyond raw growth this fingerprints the *durable-compounder* (NVDA-pattern):
+    high gross margin = pricing power, FCF margin = cash conversion not dilution.
+    A no-margin revenue-grower (the growth trap) scores low here by design."""
     m = m or {}
     rev = m.get("revenue_growth_yoy")
     eps = m.get("eps_growth_yoy")
-    nm = m.get("net_margin")
+    gm = m.get("gross_margin")
+    fcfm = m.get("fcf_margin")
     roe = m.get("roe")
     opm = m.get("operating_margin")
     pe = m.get("pe")
@@ -98,20 +110,26 @@ def compute_growth_score(m: dict | None) -> dict:
         peg_pts = _band_desc(peg, 1, 2, 4)
 
     return _assemble([
-        ("revenue_growth", "Revenue growth (YoY %)", rev, _band(rev, 0, 10, 40), 25),
-        ("eps_growth", "EPS growth (YoY %)", eps, _band(eps, 0, 10, 40), 25),
-        ("net_margin", "Net margin (%)", nm, _band(nm, 0, 15, 30), 15),
-        ("roe", "Return on equity (%)", roe, _band(roe, 0, 15, 30), 15),
+        ("revenue_growth", "Revenue growth (YoY %)", rev, _band(rev, 0, 10, 40), 20),
+        ("eps_growth", "EPS growth (YoY %)", eps, _band(eps, 0, 10, 40), 15),
+        ("gross_margin", "Pricing power (gross margin %)", gm, _band(gm, 20, 45, 70), 20),
+        ("fcf_margin", "Cash conversion (FCF margin %)", fcfm, _band(fcfm, 0, 10, 25), 15),
         ("operating_margin", "Operating margin (%)", opm, _band(opm, 0, 15, 30), 10),
+        ("roe", "Return on equity (%)", roe, _band(roe, 0, 15, 30), 10),
         ("peg", "Valuation discipline (PEG)", peg, peg_pts, 10),
     ])
 
 
 def compute_value_score(m: dict | None) -> dict:
-    """0..100 value score with per-factor breakdown."""
+    """0..100 value score with per-factor breakdown.
+
+    Cyclical-safe: EV/Sales is the lead cheapness factor because it stays valid
+    at a cycle trough when EPS is depressed/negative and P/E goes meaningless
+    (the SanDisk-trough pattern). P/E is kept but de-weighted for that reason."""
     m = m or {}
     pe = m.get("pe")
     ps = m.get("ps")
+    evs = m.get("ev_sales")
     dte = m.get("debt_to_equity")
     cr = m.get("current_ratio")
     roe = m.get("roe")
@@ -120,6 +138,7 @@ def compute_value_score(m: dict | None) -> dict:
     hi = m.get("52w_high")
     lo = m.get("52w_low")
 
+    evs_pts = None if (evs is None or evs <= 0) else _band_desc(evs, 0.5, 3, 8)
     pe_pts = None if pe is None else (0.0 if pe <= 0 else _band_desc(pe, 8, 15, 30))
     ps_pts = None if (ps is None or ps <= 0) else _band_desc(ps, 1, 4, 10)
     dte_pts = None if dte is None else (0.0 if dte < 0 else _band_desc(dte, 0.3, 1, 2.5))
@@ -131,14 +150,94 @@ def compute_value_score(m: dict | None) -> dict:
         pos_pts = _band_desc(pos, 0, 0.5, 1)
 
     return _assemble([
-        ("pe", "Earnings cheapness (P/E)", pe, pe_pts, 20),
-        ("ps", "Sales cheapness (P/S)", ps, ps_pts, 15),
+        ("ev_sales", "Cyclical-safe cheapness (EV/Sales)", evs, evs_pts, 20),
+        ("pe", "Earnings cheapness (P/E)", pe, pe_pts, 15),
+        ("ps", "Sales cheapness (P/S)", ps, ps_pts, 10),
         ("debt_to_equity", "Balance-sheet safety (D/E)", dte, dte_pts, 15),
-        ("roe", "Quality at price (ROE %)", roe, _band(roe, 0, 15, 30), 15),
-        ("current_ratio", "Liquidity (current ratio)", cr, _band(cr, 1, 1.5, 2.5), 10),
+        ("roe", "Quality at price (ROE %)", roe, _band(roe, 0, 15, 30), 10),
+        ("current_ratio", "Liquidity (current ratio)", cr, _band(cr, 1, 1.5, 2.5), 5),
         ("net_margin", "Profitability (net margin %)", nm, _band(nm, 0, 15, 30), 10),
         ("mean_reversion", "52-week range position", pos, pos_pts, 15),
     ])
+
+
+# --------------------------------------------------------------------------- #
+# Entry guidance — deterministic, hedged. NEVER a buy signal.                  #
+# --------------------------------------------------------------------------- #
+def entry_guidance(m: dict, growth: dict, value: dict, margin_trend: dict | None) -> dict:
+    """Data-derived flags + things to watch. Mirrors the alert engine's
+    reasons/risks/invalidation discipline: observations, not recommendations.
+    There is no 'safe' price — these only surface what a disciplined investor
+    would verify and monitor before and after initiating."""
+    g, v = growth.get("score", 0), value.get("score", 0)
+    pe, fpe = m.get("pe"), m.get("forward_pe")
+    dte, fcfm = m.get("debt_to_equity"), m.get("fcf_margin")
+    price, hi, lo = m.get("price"), m.get("52w_high"), m.get("52w_low")
+
+    pos = None
+    if price is not None and hi is not None and lo is not None and hi > lo:
+        pos = (price - lo) / (hi - lo)
+
+    # Valuation state (cheap/fair/rich × where in the 52-week range).
+    cheap = "screens cheap" if v >= 60 else "screens rich" if v <= 40 else "fairly valued"
+    where = (
+        "near 52-week high" if pos is not None and pos > 0.75
+        else "near 52-week low" if pos is not None and pos < 0.35
+        else "mid-range"
+    )
+    valuation_state = f"{cheap} · {where}" if pos is not None else cheap
+
+    flags: list[dict] = []
+    # The headline cyclical trap: cheap forward P/E + price near the high.
+    if pe and fpe and pe > 0 and fpe > 0 and fpe / pe < 0.65 and (pos or 0) > 0.7:
+        flags.append({"level": "flag", "text": (
+            f"Possible cycle peak: forward P/E ({round(fpe,1)}) sits far below trailing "
+            f"({round(pe,1)}) while price is near its 52-week high. The forward multiple "
+            "may be flattered by peak-cycle earnings — verify against normalized / mid-cycle "
+            "earnings before reading it as 'cheap'."
+        )})
+    if margin_trend and margin_trend.get("direction") == "eroding":
+        flags.append({"level": "flag", "text": (
+            f"Gross margin eroding ({margin_trend['delta_pts']} pts over the window) — "
+            "pricing power may be weakening (commoditization risk). The moat fingerprint is fading."
+        )})
+    if fcfm is not None and fcfm <= 0:
+        flags.append({"level": "caution", "text": (
+            "Not self-funding: free-cash-flow margin is negative. Growth depends on external "
+            "capital — watch for dilution or rising debt."
+        )})
+    if dte is not None and dte > 2:
+        flags.append({"level": "caution", "text": (
+            f"High leverage (D/E {dte}) — thinner cushion through a downturn or rate shock."
+        )})
+    if g >= 70 and v <= 40:
+        flags.append({"level": "note", "text": (
+            "High quality, richly priced: returns now lean on growth being delivered and the "
+            "multiple not compressing. Little margin of safety in price — for names like this the "
+            "usual entry is a thesis-intact drawdown, not a discount."
+        )})
+    if v >= 65 and g <= 35:
+        flags.append({"level": "note", "text": (
+            "Cheap but low-quality on these metrics — confirm it's a cyclical trough / temporary "
+            "depression, not secular decline (the value-trap test)."
+        )})
+
+    watch = [
+        "Gross-margin trend each quarter — rising/stable = moat intact; falling = thesis cracking.",
+        "Revenue growth: re-accelerating or decelerating? Acceleration is the inflection signal.",
+        "Free-cash-flow margin direction (cash conversion, not just reported earnings).",
+        "Whether the cheapness is on normalized earnings or peak-cycle earnings.",
+    ]
+    return {
+        "valuation_state": valuation_state,
+        "flags": flags,
+        "watch": watch,
+        "disclaimer": (
+            "No 'safe' price exists. These are research observations, not a recommendation to "
+            "buy or sell. Size positions so being wrong isn't fatal; exit on thesis-loss (the "
+            "signals break), not price-loss (it merely fell)."
+        ),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -147,8 +246,10 @@ def compute_value_score(m: dict | None) -> dict:
 def _fetch_metrics(symbol: str) -> dict | None:
     """Fundamentals merged across providers + a current price for mean-reversion.
 
-    Alpha Vantage is the primary fundamentals source; Finnhub (when live) fills
-    the fields AV's OVERVIEW lacks (debt/equity, current ratio, operating margin).
+    Yahoo (yfinance) is the primary source: one call returns the moat/cyclical
+    fingerprint fields Alpha Vantage OVERVIEW lacks — gross margin, FCF margin,
+    EV/Sales, D/E, forward P/E. Alpha Vantage / Finnhub then *fill* any gaps
+    (they never overwrite a present yfinance value).
     """
     if settings.use_mock_data:
         m = mock.get_metrics(symbol) if hasattr(mock, "get_metrics") else None
@@ -158,26 +259,44 @@ def _fetch_metrics(symbol: str) -> dict | None:
             m.setdefault("price", q.get("last"))
         return m or None
 
+    yf = yahoo.get_fundamentals(symbol)
     av = alphavantage.get_metrics(symbol) if alphavantage.configured else None
     fh = finnhub.get_metrics(symbol) if finnhub.configured else None
-    if not av and not fh:
+    if not yf and not av and not fh:
         return None
-    # Start with Finnhub, overlay AV's non-null values (AV more reliable for
-    # growth/margin fields per provider notes); keep Finnhub-only fields.
-    m: dict = dict(fh or {})
-    for k, v in (av or {}).items():
-        if v is not None:
-            m[k] = v
+    # yfinance is primary; backfill missing fields from AV then Finnhub.
+    m: dict = dict(yf or {})
+    for src in (av, fh):
+        for k, v in (src or {}).items():
+            if v is not None and m.get(k) is None:
+                m[k] = v
 
-    # Current price for the 52-week mean-reversion factor.
-    q = (
-        (finnhub.get_quote(symbol) if finnhub.configured else None)
-        or yahoo.get_quote(symbol)
-        or (alphavantage.get_quote(symbol) if alphavantage.configured else None)
-    )
-    if q:
-        m["price"] = q.get("last")
+    # Ensure a current price for the 52-week mean-reversion factor.
+    if m.get("price") is None:
+        q = (
+            (finnhub.get_quote(symbol) if finnhub.configured else None)
+            or yahoo.get_quote(symbol)
+            or (alphavantage.get_quote(symbol) if alphavantage.configured else None)
+        )
+        if q:
+            m["price"] = q.get("last")
     return m
+
+
+def _load_note(symbol: str) -> dict | None:
+    """Stored human moat thesis for a ticker, if any."""
+    from .models import GrowthValueNote
+
+    with SessionLocal() as db:
+        n = db.scalar(select(GrowthValueNote).where(GrowthValueNote.symbol == symbol.upper()))
+        if not n:
+            return None
+        return {
+            "thesis": n.thesis,
+            "risks": n.risks,
+            "watch": n.watch,
+            "updated_at": n.updated_at.isoformat() if n.updated_at else None,
+        }
 
 
 def scorecard(symbol: str) -> dict:
@@ -188,25 +307,36 @@ def scorecard(symbol: str) -> dict:
         return {
             "symbol": symbol,
             "available": False,
-            "note": "No fundamentals available for this ticker from configured providers.",
+            "unavailable_reason": "No fundamentals available for this ticker from configured providers.",
             "growth": compute_growth_score(None),
             "value": compute_value_score(None),
+            "note": _load_note(symbol),
             "metrics": {},
         }
+    growth = compute_growth_score(m)
+    value = compute_value_score(m)
+    margin_trend = yahoo.gross_margin_trend(symbol) if not settings.use_mock_data else None
     return {
         "symbol": symbol,
         "available": True,
-        "growth": compute_growth_score(m),
-        "value": compute_value_score(m),
+        "growth": growth,
+        "value": value,
+        "margin_trend": margin_trend,
+        "entry_guidance": entry_guidance(m, growth, value, margin_trend),
+        "note": _load_note(symbol),
         "metrics": {
             "price": m.get("price"),
             "market_cap": m.get("market_cap"),
             "pe": m.get("pe"),
+            "forward_pe": m.get("forward_pe"),
             "ps": m.get("ps"),
+            "ev_sales": m.get("ev_sales"),
             "revenue_growth_yoy": m.get("revenue_growth_yoy"),
             "eps_growth_yoy": m.get("eps_growth_yoy"),
+            "gross_margin": m.get("gross_margin"),
             "net_margin": m.get("net_margin"),
             "operating_margin": m.get("operating_margin"),
+            "fcf_margin": m.get("fcf_margin"),
             "roe": m.get("roe"),
             "debt_to_equity": m.get("debt_to_equity"),
             "current_ratio": m.get("current_ratio"),
@@ -252,9 +382,12 @@ def _scan_one(symbol: str) -> dict | None:
         "market_cap": m.get("market_cap"),
         "pe": m.get("pe"),
         "ps": m.get("ps"),
+        "ev_sales": m.get("ev_sales"),
         "revenue_growth_yoy": m.get("revenue_growth_yoy"),
         "eps_growth_yoy": m.get("eps_growth_yoy"),
+        "gross_margin": m.get("gross_margin"),
         "net_margin": m.get("net_margin"),
+        "fcf_margin": m.get("fcf_margin"),
         "roe": m.get("roe"),
         "debt_to_equity": m.get("debt_to_equity"),
     }

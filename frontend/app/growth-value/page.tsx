@@ -8,6 +8,8 @@ import {
   type GVUniverse,
   type GVScorecard,
   type GVFactor,
+  type GVEntryGuidance,
+  type GVNote,
 } from "@/lib/api";
 
 type SortBy = "growth" | "value";
@@ -94,9 +96,23 @@ function Drilldown({ ticker }: { ticker: string }) {
   if (err) return <p className="text-sm text-rose-300">{err}</p>;
   if (!card) return <p className="text-sm text-slate-400">Loading scorecard…</p>;
   if (!card.available)
-    return <p className="text-sm text-amber-300">{card.note ?? "No fundamentals available."}</p>;
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-amber-300">
+          {card.unavailable_reason ?? "No fundamentals available."}
+        </p>
+        <ThesisEditor ticker={ticker} note={card.note ?? null} />
+      </div>
+    );
 
   const m = card.metrics;
+  const mt = card.margin_trend;
+  const trendColor =
+    mt?.direction === "rising"
+      ? "text-emerald-300"
+      : mt?.direction === "eroding"
+        ? "text-rose-300"
+        : "text-slate-300";
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2 text-xs text-slate-400">
@@ -104,12 +120,28 @@ function Drilldown({ ticker }: { ticker: string }) {
         {m.industry && <span className="chip">{m.industry}</span>}
         <span className="chip">Price {num(m.price, 2)}</span>
         <span className="chip">P/E {num(m.pe)}</span>
-        <span className="chip">P/S {num(m.ps)}</span>
+        <span className="chip">Fwd P/E {num(m.forward_pe)}</span>
+        <span className="chip">EV/Sales {num(m.ev_sales)}</span>
+        <span className="chip">Gross mgn {num(m.gross_margin, 1, "%")}</span>
+        <span className="chip">FCF mgn {num(m.fcf_margin, 1, "%")}</span>
         <span className="chip">Rev gth {num(m.revenue_growth_yoy, 1, "%")}</span>
-        <span className="chip">Net mgn {num(m.net_margin, 1, "%")}</span>
         <span className="chip">ROE {num(m.roe, 1, "%")}</span>
         <span className="chip">D/E {num(m.debt_to_equity, 2)}</span>
       </div>
+      {mt && (
+        <p className="text-xs text-slate-400">
+          Gross-margin trend:{" "}
+          <span className={`font-semibold ${trendColor}`}>
+            {mt.direction} ({mt.delta_pts > 0 ? "+" : ""}
+            {mt.delta_pts} pts
+          </span>{" "}
+          <span className="font-mono text-slate-500">
+            {mt.history.map(([yr, gm]) => `${yr}:${gm}%`).join("  ")}
+          </span>{" "}
+          — rising/stable margins signal pricing power (moat); eroding signals
+          commoditization.
+        </p>
+      )}
       <div className="grid gap-4 md:grid-cols-2">
         <div className="card">
           <div className="mb-3 flex items-center justify-between">
@@ -126,6 +158,141 @@ function Drilldown({ ticker }: { ticker: string }) {
           <FactorBars factors={card.value.factors} />
         </div>
       </div>
+      {card.entry_guidance && <EntryGuidance g={card.entry_guidance} />}
+      <ThesisEditor ticker={ticker} note={card.note ?? null} />
+    </div>
+  );
+}
+
+const FLAG_STYLE: Record<string, string> = {
+  flag: "border-rose-400/40 text-rose-200",
+  caution: "border-amber-400/40 text-amber-200",
+  note: "border-slate-500/40 text-slate-300",
+};
+
+function EntryGuidance({ g }: { g: GVEntryGuidance }) {
+  return (
+    <div className="card space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="section-label mb-0">When to act · what to watch</span>
+        <span className="chip">{g.valuation_state}</span>
+      </div>
+
+      {/* Data-derived flags */}
+      {g.flags.length > 0 && (
+        <ul className="space-y-2">
+          {g.flags.map((f, i) => (
+            <li
+              key={i}
+              className={`rounded-xl border bg-black/20 px-3 py-2 text-sm ${FLAG_STYLE[f.level] ?? FLAG_STYLE.note}`}
+            >
+              <span className="mr-1.5 font-semibold uppercase tracking-wide text-xs opacity-70">
+                {f.level}
+              </span>
+              {f.text}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Regime playbooks — general discipline, not a recommendation */}
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
+          <p className="mb-1 font-semibold text-slate-100">If you judge it a moat compounder</p>
+          <p className="text-slate-400">
+            Rarely gets cheap. Disciplined entry = reasonable vs its own growth (reverse-DCF / PEG),
+            scaled in, added on <em>thesis-intact</em> drawdowns (price falls, moat metrics don&apos;t).
+            Expect large interim volatility.
+          </p>
+          <p className="mt-2 text-rose-200/80">
+            Invalidation: gross margin erodes several quarters · growth decelerates with no
+            re-acceleration · FCF margin falls · a rival breaks the lock-in.
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
+          <p className="mb-1 font-semibold text-slate-100">If you judge it a cyclical</p>
+          <p className="text-slate-400">
+            Buy pessimism, not strength: near the 52-week low, EV/Sales below its own history,
+            industry capex being cut, a balance sheet that survives the trough, demand structurally
+            intact. <span className="text-amber-200">Avoid</span> when forward P/E looks cheap near
+            the highs — that&apos;s peak earnings, the classic trap.
+          </p>
+          <p className="mt-2 text-rose-200/80">
+            Invalidation: demand declining structurally (not cyclically) · leverage forcing
+            dilution · no industry supply discipline.
+          </p>
+        </div>
+      </div>
+
+      {/* What to monitor */}
+      <div>
+        <p className="section-label">Monitor each quarter</p>
+        <ul className="list-disc space-y-1 pl-5 text-sm text-slate-400">
+          {g.watch.map((w, i) => (
+            <li key={i}>{w}</li>
+          ))}
+        </ul>
+      </div>
+
+      <p className="text-xs italic text-slate-500">{g.disclaimer}</p>
+    </div>
+  );
+}
+
+function ThesisEditor({ ticker, note }: { ticker: string; note: GVNote | null }) {
+  const [thesis, setThesis] = useState(note?.thesis ?? "");
+  const [risks, setRisks] = useState(note?.risks ?? "");
+  const [watch, setWatch] = useState(note?.watch ?? "");
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<string | null>(note?.updated_at ?? null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = async () => {
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await api.saveGvNote(ticker, { thesis, risks, watch });
+      setSavedAt(res.updated_at);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fields: [string, string, string, (v: string) => void, string][] = [
+    ["Moat thesis — why a durable advantage exists", thesis, "CUDA ecosystem lock-in; switching costs; scale cost advantage…", setThesis, "thesis"],
+    ["What would break it (disconfirming evidence)", risks, "Custom ASICs displace GPUs; commoditization; customer concentration…", setRisks, "risks"],
+    ["What to watch", watch, "Gross-margin trend; hyperscaler capex; competitive roadmap…", setWatch, "watch"],
+  ];
+
+  return (
+    <div className="card space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="section-label mb-0">Your moat thesis · {ticker}</span>
+        <span className="text-xs text-slate-500">
+          {savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}
+        </span>
+      </div>
+      <p className="text-xs text-slate-500">
+        The score reads backward-looking margins — it flags a moat&apos;s footprint, it cannot
+        certify a future moat. Write the qualitative judgment the number can&apos;t.
+      </p>
+      {fields.map(([label, value, ph, set, key]) => (
+        <label key={key} className="block space-y-1">
+          <span className="text-xs text-slate-400">{label}</span>
+          <textarea
+            className="input min-h-[60px] w-full resize-y"
+            placeholder={ph}
+            value={value}
+            onChange={(e) => set(e.target.value)}
+          />
+        </label>
+      ))}
+      {err && <p className="text-sm text-rose-300">{err}</p>}
+      <button className="btn-primary" onClick={save} disabled={saving}>
+        {saving ? "Saving…" : "Save thesis"}
+      </button>
     </div>
   );
 }
@@ -201,8 +368,10 @@ export default function GrowthValuePage() {
         <h1 className="grad-text text-3xl font-extrabold tracking-tight">Growth &amp; Value</h1>
         <p className="max-w-3xl text-sm text-slate-400">
           Long-horizon research scorecards (0–100) built from fundamentals — separate from the
-          short-term options signals. Simplified, fundamentals-only: no FCF yield, EV/EBITDA, or
-          multi-year CAGR. Research only — not investment advice.
+          short-term options signals. <span className="text-slate-300">Growth/Moat</span> rewards
+          the durable-compounder fingerprint (high gross margin = pricing power, FCF conversion);{" "}
+          <span className="text-slate-300">Value</span> uses EV/Sales so cyclicals stay scoreable
+          at a trough when P/E breaks. Research only — not investment advice.
         </p>
       </header>
 
@@ -286,14 +455,14 @@ export default function GrowthValuePage() {
               <thead>
                 <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
                   <th className="px-4 py-3">Ticker</th>
-                  <th className="px-4 py-3">Growth</th>
+                  <th className="px-4 py-3">Growth / Moat</th>
                   <th className="px-4 py-3">Value</th>
                   <th className="px-4 py-3 text-right">Price</th>
                   <th className="px-4 py-3 text-right">Rev YoY</th>
-                  <th className="px-4 py-3 text-right">EPS YoY</th>
+                  <th className="px-4 py-3 text-right">Gross mgn</th>
+                  <th className="px-4 py-3 text-right">FCF mgn</th>
                   <th className="px-4 py-3 text-right">P/E</th>
-                  <th className="px-4 py-3 text-right">P/S</th>
-                  <th className="px-4 py-3 text-right">Net mgn</th>
+                  <th className="px-4 py-3 text-right">EV/S</th>
                   <th className="px-4 py-3 text-right">ROE</th>
                 </tr>
               </thead>
@@ -323,12 +492,14 @@ export default function GrowthValuePage() {
                           {num(r.revenue_growth_yoy, 1, "%")}
                         </td>
                         <td className="px-4 py-3 text-right font-mono tabular-nums">
-                          {num(r.eps_growth_yoy, 1, "%")}
+                          {num(r.gross_margin, 1, "%")}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono tabular-nums">
+                          {num(r.fcf_margin, 1, "%")}
                         </td>
                         <td className="px-4 py-3 text-right font-mono tabular-nums">{num(r.pe)}</td>
-                        <td className="px-4 py-3 text-right font-mono tabular-nums">{num(r.ps)}</td>
                         <td className="px-4 py-3 text-right font-mono tabular-nums">
-                          {num(r.net_margin, 1, "%")}
+                          {num(r.ev_sales)}
                         </td>
                         <td className="px-4 py-3 text-right font-mono tabular-nums">
                           {num(r.roe, 1, "%")}
